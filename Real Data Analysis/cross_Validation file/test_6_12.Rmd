@@ -1,0 +1,488 @@
+---
+title: "real data analysis"
+author: "Seo Jae Hyun"
+date: '2022-11-03'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(locfit)
+library(locpol)
+library(rdd)
+library(pscl)
+library(gridExtra)
+
+
+```
+
+
+### Data importing
+
+
+```{r data importing}
+
+
+dat = read.csv('S1_Data.csv')
+
+```
+
+
+### Variable 소개
+
+EarliestCD4Count : Value of Earliest CD4 Count, cells per mm3 contin numeric
+
+QtrOfEarliestCD4Count : Quarter of Earliest CD4 Count (exact date suppressed) discrete character
+
+female : Female discrete numeric
+
+agecat : Age category (exact age suppressed) discrete numeric
+
+Clinic_A : Entered care at Clinic A discrete numeric
+
+Clinic_B : Entered care at Clinic B discrete numeric
+
+Clinic_C : Entered care at Clinic C discrete numeric
+
+Clinic_Other : Entered care at a clinic other than A, B, or C discrete numeric
+
+ART_2w : Started ART within 2 weeks of earliest CD4 count discrete numeric
+
+ART_6m : Started ART within 6 months of earliest CD4 count discrete numeric
+
+ART_12m : Started ART within 12 months of earliest CD4 count discrete numeric
+
+visit_test_6_18 : Retained at 12 months; any labs or clinic visits 6-18 mo after earliest CD4 discrete numeric
+
+test_6_18 : Retained at 12 months; any lab tests 6-18 months after earliest CD4 discrete numeric
+
+test_0_6 : Retained 0-6 months; any lab tests 0-6 months after earliest CD4 discrete numeric
+
+test_6_12 : Retained 6-12 months; any lab tests 6-12 months after earliest CD4 discrete numeric
+
+test_12_18 : Retained 12-18 months; any lab tests 12-18 months after earliest CD4 discrete numeric
+
+test_18_24 : Retained 18-24 months; any lab tests 18-24 months after earliest CD4 discrete numeric
+
+treatment : I(EarliestCD4Count<350)
+
+
+
+
+```{r eda}
+
+
+
+
+for (i in 2:17){
+  
+  dat[, i] = factor(dat[, i])
+  
+}
+
+
+dat = dat %>% mutate(treatment = EarliestCD4Count<350)
+
+
+```
+
+
+
+```{r local linear regression}
+
+
+one_linear_ft_coef_and_var=function(data, value, bw, dire='left'){
+  
+  if (dire=='left'){
+    result=data %>% filter(x<value & x>value-bw)
+  }
+  else if (dire=='right'){
+    result=data %>% filter(x>=value & x<value+bw)
+  }
+  else {
+    result='error : dire must be left or right'
+  }
+    
+  K= dnorm(x=value, mean=result$x, sd=bw)
+  data_revision = result %>% mutate(x=x-value)
+  est=lm(y~x, data=data_revision)
+  
+  
+  return(list(est$coefficients, vcov(est)))
+
+
+}
+
+
+# compute tau_SRD by local linear regression
+
+
+
+SRD_lm_coef_var=function(data, value, bw){
+  
+  
+  result_left = one_linear_ft_coef_and_var(data=data, value=value, bw=bw, dire='left')
+  result_right = one_linear_ft_coef_and_var(data=data, value=value, bw=bw, dire='right')
+  
+  
+  mu_right = result_right[[1]][1]
+  mu_left = result_left[[1]][1]
+  
+  tauhat=result_right[[1]][1]-result_left[[1]][1]
+  
+  
+  sigma_left=result_left[[2]]
+  sigma_right=result_right[[2]]
+  
+  
+  
+  nl=sum(data$x<value & data$x>value-bw)
+  nr=sum(data$x>value & data$x<value+bw)
+  
+
+  asym_var=sigma_left[1, 1]+sigma_right[1, 1]
+  
+  
+  return(c(tauhat, asym_var, mu_left, mu_right))
+
+  
+}
+
+
+newdat = dat %>% select(c(EarliestCD4Count, ART_6m)) %>% mutate(ART_6m = as.numeric(ART_6m))
+
+colnames(newdat) = c('x', 'y')
+
+
+
+```
+
+
+
+
+```{r local likelhood}
+
+
+
+one_glm_ft_coef_and_var = function(data, value, bw, dire='left', type){
+  
+  
+  if (dire=='left'){
+    result=data %>% filter(x<value & x>value-bw)
+  }
+  else if (dire=='right'){
+    result=data %>% filter(x>=value & x<value+bw)
+  }
+  else {
+    result='error : dire must be left or right'
+  }
+  
+  K= dnorm(x=value, mean=result$x, sd=bw)
+  data_revision = result %>% mutate(x=x-value)
+  est=glm(y~x, data=data_revision, family = type)
+  
+  
+  return(list(est$coefficients, vcov(est)))
+  
+  
+}
+
+
+
+# compute tau_SRD by local likelihood
+
+
+
+SRD_glm_coef_var = function(data, value, bw, type){
+  
+  
+  result_left = one_glm_ft_coef_and_var(data=data, value=value, bw=bw, dire='left', type)
+  result_right = one_glm_ft_coef_and_var(data=data, value=value, bw=bw, dire='right', type)
+  
+  if (type == 'poisson'){
+    
+    mu_left = exp(result_left[[1]][1])
+    mu_right = exp(result_right[[1]][1])
+    
+    tau_hat = mu_right - mu_left
+    
+    sigma_left = result_left[[2]]
+    sigma_right = result_right[[2]]
+    
+    asym_var = mu_left^2*sigma_left[1, 1] + mu_right^2*sigma_right[1, 1]
+    
+  }
+  
+  else if (type == 'binomial'){
+    
+    mu_left = exp(result_left[[1]][1])/(1+exp(result_left[[1]][1]))
+    mu_right = exp(result_right[[1]][1])/(1+exp(result_right[[1]][1]))
+    tau_hat = mu_right - mu_left
+    
+    sigma_left =result_left[[2]]
+    sigma_right = result_right[[2]]
+    
+    asym_var = (exp(result_left[[1]][1])/(1+exp(result_left[[1]][1]))^2)^2 * sigma_left[1, 1] + (exp(result_right[[1]][1])/(1+exp(result_right[[1]][1]))^2)^2 * sigma_right[1, 1]
+    
+  }
+  
+  else if (type == 'quasipoisson'){
+    
+    mu_left = exp(result_left[[1]][1])
+    mu_right = exp(result_right[[1]][1])
+    
+    tau_hat = mu_right - mu_left
+    
+    sigma_left = result_left[[2]]
+    sigma_right = result_right[[2]]
+    
+    asym_var = mu_left^2*sigma_left[1, 1] + mu_right^2*sigma_right[1, 1]
+    
+  }
+  
+  
+  return(c(tau_hat, asym_var, mu_left, mu_right))
+
+}
+
+
+newdat$y = ifelse(newdat$y==1, 0, 1)
+
+
+```
+
+
+
+
+```{r automation}
+
+
+make_result=function(data, column, cutoff, linbw, locbw){
+  
+  newdat = data[, c('EarliestCD4Count', column)]
+  newdat = newdat %>% filter(newdat[[column]]==1 | newdat[[column]]==0)
+  colnames(newdat) = c('x', 'y')
+  newdat$y = ifelse(newdat$y==1, 0, 1)
+  
+
+  
+  lin_result = SRD_lm_coef_var(newdat,cutoff, linbw)
+  loc_result = SRD_glm_coef_var(newdat, cutoff, locbw, 'binomial')
+  
+  result=data.frame('outcome'=c(column, column),'type'=c('loc', 'lin'), 'tau_est' = c(loc_result[1], lin_result[1]), 'tau_var'=c(loc_result[2], lin_result[2]), 'left'=c(loc_result[3], lin_result[3]), 'right'=c(loc_result[4], lin_result[4]))
+  
+  
+  
+  
+}
+
+
+result = make_result(data=dat, column='ART_6m', cutoff=350, linbw=96.3, locbw=100)
+
+colname = colnames(dat)
+
+for (i in 12:17){
+  
+  result = rbind(result, make_result(data=dat, column=colname[i], cutoff=350, linbw=100, locbw=100))
+  
+}
+
+result = result %>% mutate(tau_est = round(tau_est, 5),
+                          tau_var = round(tau_var, 6),
+                          left = round(left, 3),
+                          right = round(right, 3))
+
+
+
+
+
+```
+
+
+
+
+```{r cv}
+
+### Cross-validation
+
+
+### Finding quantile
+
+quntilerange=function(data, q,cutoff){
+  
+  return(c(quantile(data$x[data$x<cutoff], q), quantile(data$x[data$x>=cutoff], 1-q)))
+}
+
+
+
+
+### Cross-validation
+
+cv_rd_srd = function(newdata, column, cutoff, q, bw, type='binomial'){
+  
+  
+  newdat = newdata[, c('EarliestCD4Count', column)]
+  newdat = newdat %>% filter(newdat[[column]]==1 | newdat[[column]]==0)
+  colnames(newdat) = c('x', 'y')
+  newdat$y = ifelse(newdat$y==1, 0, 1)
+  data = newdat
+  cvrange=quntilerange(data=data, q=q, cutoff=cutoff)
+  
+  
+  check_df=data[data$x>=cvrange[1] & data$x<=cvrange[2], ]
+  check_x=check_df$x
+  
+  
+  result=NULL
+  
+  
+  if (type=='ZIP'){
+    
+    for (i in 1:length(check_x)){
+      if (check_x[i]<cutoff){
+        re = one_zeroinfl_ft_coef_and_var(data=data, value=check_x[i], bw=bw, dire='left')[[1]]
+      }
+      else if (check_x[i]>=cutoff){
+        
+        re = one_zeroinfl_ft_coef_and_var(data=data, value=check_x[i], bw=bw, dire='right')[[1]]
+      }
+      
+      pi=exp(re$zero[1])/(1+exp(re$zero[1]))
+      lambda=exp(re$count[1])
+      
+      check_y = check_df[i, 'y']
+      
+      like = ifelse(check_y==0, log(pi +(1-pi)*exp(-lambda)), log(1-pi) - lambda + check_y*log(lambda))
+      
+      result=c(result, like)
+      
+    }
+  }
+  
+  
+  else if (type=='linear'){
+    
+    for (i in 1:length(check_x)){
+      
+      if (check_x[i]<cutoff){
+        
+        re=one_linear_ft_coef_and_var(data=data, value=check_x[i], bw=bw, dire='left')[[1]]
+      }
+      else if (check_x[i]>=cutoff){
+        
+        
+        re=one_linear_ft_coef_and_var(data=data, value=check_x[i], bw=bw, dire='right')[[1]]
+      }
+      
+      mu=re[1]
+      result=c(result, mu)
+    }
+    
+    return(mean((check_df$y-result)^2))
+  }
+  
+  
+  else {
+    
+    for (i in 1:length(check_x)){
+      if (check_x[i]<cutoff){
+        re = one_glm_ft_coef_and_var(data=data, value=check_x[i], bw=bw, dire='left', type=type)[[1]]
+        
+      }
+      else{
+        
+        re = one_glm_ft_coef_and_var(data=data, value=check_x[i], bw=bw, dire='right', type=type)[[1]]
+        
+      }
+      
+      check_y = check_df[i, 'y']
+      
+      if (type =='binomial'){
+        
+        pi = exp(re[1])/(1+exp(re[1]))
+        like = check_y * log(pi/(1-pi)) + log(1-pi)
+        
+      }
+      else{
+        
+         lambda = exp(re[1])
+        like = -lambda + y*log(lambda)
+      }
+      
+      result = c(result, like)
+    }
+    
+    
+  }
+  
+  return(sum(result))
+  
+}
+
+
+
+
+
+
+
+```
+
+
+
+y : ART_6m, visit_test_6_18, test_0_6, test_6_12, test_12_18, test_18_24, test_6_18
+
+bw : 96.4, 142.1, 114.2, 164.7, 125.4, 164.2, 116.8
+
+
+```{r cv bandwidth setting}
+
+
+
+
+test_name = c('ART_6m', 'visit_test_6_18', 'test_0_6', 'test_6_12', 'test_12_18', 'test_18_24', 'test_6_18')
+bandwidth_lin = c(96.4, 142.1, 114.2, 164.7, 125.4, 164.2, 116.8)
+
+
+colname
+
+
+check_bw = function(newdata, column, cutoff, q, bw_center){
+  
+  
+  results = c()
+  
+  
+  bw = bw_center + seq(-10, 10, by=0.2)
+  
+  
+  for (i in 1:length(bw)){
+    
+    
+    result = cv_rd_srd(newdata=newdata, column = column, cutoff=cutoff, q=q, bw=bw[i])
+    
+    results = c(results, result)
+    
+    print(paste0(i, ' working'))
+    
+  }
+
+  
+  return(results)
+  
+}
+
+
+
+result = check_bw(dat, test_name[4], 350, 0.5, bandwidth_lin[4])
+
+write.csv(result, 'test_6_12.csv')
+
+
+
+
+
+```
+
+

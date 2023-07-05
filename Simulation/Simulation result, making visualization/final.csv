@@ -1,0 +1,31 @@
+model,type,N,mse,arb,coverage
+local likelihood,bernoulli,100,0.062,-0.509,0.92
+local likelihood,bernoulli,300,0.031,-0.343,0.913
+local likelihood,bernoulli,500,0.019,-0.268,0.976
+local likelihood,bernoulli,1000,0.019,-0.276,0.886
+local likelihood,bernoulli,3000,0.012,-0.193,0.92
+local linear regression,bernoulli,100,0.231,-0.803,0.963
+local linear regression,bernoulli,300,0.388,-0.647,0.938
+local linear regression,bernoulli,500,0.077,-0.48,0.939
+local linear regression,bernoulli,1000,0.061,-0.478,0.945
+local linear regression,bernoulli,3000,0.049,-0.427,0.964
+local likelihood,poi,100,2.242,0.139,0.958
+local likelihood,poi,300,1.191,0.096,0.935
+local likelihood,poi,500,0.857,0.092,0.952
+local likelihood,poi,1000,0.809,0.082,0.911
+local likelihood,poi,3000,0.474,0.065,0.924
+local linear regression,poi,100,130.223,0.917,0.825
+local linear regression,poi,300,38.809,0.545,0.876
+local linear regression,poi,500,82.799,0.466,0.9
+local linear regression,poi,1000,12.941,0.356,0.93
+local linear regression,poi,3000,3.304,0.21,0.94
+local likelihood,zip,100,3.841,0.302,0.915
+local likelihood,zip,300,2.063,0.207,0.914
+local likelihood,zip,500,1.161,0.156,0.939
+local likelihood,zip,1000,0.785,0.129,0.932
+local likelihood,zip,3000,0.405,0.09,0.928
+local linear regression,zip,100,465.051,2.193,0.871
+local linear regression,zip,300,123.909,1.166,0.887
+local linear regression,zip,500,67.923,1.023,0.885
+local linear regression,zip,1000,28.509,0.742,0.89
+local linear regression,zip,3000,6.604,0.385,0.964
